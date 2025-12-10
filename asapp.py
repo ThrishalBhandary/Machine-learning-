@@ -1,127 +1,65 @@
-import streamlit as st
-import numpy as np
 import pandas as pd
-from sklearn.model_selection import train_test_split
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, precision_score, recall_score
-from sklearn.datasets import make_classification
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy.stats import zscore
 
-# --- 1. Helper Function for Model Training and Evaluation ---
-def evaluate_model(majority_ratio):
-    """Generates imbalanced data, trains a model, and returns metrics."""
+# --- 1. Generate Synthetic Time Series Data ---
+# Set seed for reproducibility
+np.random.seed(42)
 
-    N_samples = 1000
-    # Calculate the number of minority samples based on the ratio (e.g., 9:1 ratio means 100 minority, 900 majority)
-    N_minority = int(N_samples / (1 + majority_ratio))
-    N_majority = N_samples - N_minority
+# Create 100 days of data
+dates = pd.date_range(start='2024-01-01', periods=100)
+# Create 'normal' data: random values centered around 50 with a small standard deviation
+data = np.random.normal(loc=50, scale=3, size=100)
 
-    # Define weights for make_classification to generate the desired imbalance
-    weights = [N_majority / N_samples, N_minority / N_samples] # [Class 0 (Majority), Class 1 (Minority)]
+# Inject Anomaly/Outlier Moments (Points)
+data[20] = 75  # Extreme positive spike (Point Anomaly)
+data[75] = 40  # Extreme negative dip
+data[80:83] = [68, 70, 69] # Collective Anomaly (short sequence of unusual points)
 
-    # Generate a synthetic dataset
-    X, y = make_classification(
-        n_samples=N_samples,
-        n_features=5,
-        n_redundant=0,
-        n_informative=3,
-        n_clusters_per_class=1,
-        weights=weights,
-        flip_y=0,
-        random_state=42
-    )
+df = pd.DataFrame({'Date': dates, 'Value': data})
 
-    # Split Data (stratify ensures both sets maintain the imbalance ratio)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.3, random_state=42, stratify=y
-    )
+# --- 2. Calculate Z-Scores ---
+# The Z-Score tells us how many standard deviations a data point is from the mean.
+df['Z_Score'] = zscore(df['Value'])
 
-    # Train a simple Logistic Regression model
-    model = LogisticRegression(solver='liblinear', random_state=42, class_weight='balanced')
-    model.fit(X_train, y_train)
-    y_pred = model.predict(X_test)
+# --- 3. Flag Anomalies based on a Threshold ---
+# A common threshold for normal distributions is 3 standard deviations (a Z-Score of |Z| > 3).
+threshold = 3.0
+df['Anomaly'] = (df['Z_Score'].abs() > threshold)
 
-    # Calculate Metrics (F1, Precision, Recall are calculated for the MINORITY class (1) by default)
-    accuracy = accuracy_score(y_test, y_pred)
-    f1 = f1_score(y_test, y_pred)
-    precision = precision_score(y_test, y_pred)
-    recall = recall_score(y_test, y_pred)
-    cm = confusion_matrix(y_test, y_pred)
+# Isolate the anomalous points for visualization
+anomalies = df[df['Anomaly']]
 
-    return accuracy, f1, precision, recall, cm, y_test.sum(), len(y_test) - y_test.sum()
+# --- 4. Visualize the Outlier Moments ---
+print(f"--- Detected Anomaly Moments (Z-Score > {threshold}) ---")
+print(anomalies[['Date', 'Value', 'Z_Score']])
+print("-" * 50)
 
-# --- 2. Streamlit App Layout ---
-def main():
-    st.title('Imbalanced Data Evaluation: Why Accuracy Fails')
+# Create the plot
+plt.figure(figsize=(14, 6))
 
-    st.markdown("""
-    Use the slider to create a highly **imbalanced dataset** and observe how the **Accuracy** metric remains high even when the **F1-Score** reveals poor performance on the **Minority Class**.
-    """)
+# Plot the normal time series data
+plt.plot(df['Date'], df['Value'], label='Time Series Value', color='blue', alpha=0.7)
 
-    st.sidebar.header('Configuration')
-    
-    # Slider for user input
-    majority_ratio = st.sidebar.slider(
-        'Majority Class to Minority Class Ratio (Class 0 : Class 1)',
-        min_value=1.0, # Balanced
-        max_value=15.0, # Extreme Imbalance
-        value=9.0,
-        step=1.0,
-        format='%.1f : 1'
-    )
-    
-    # Execute the evaluation function
-    accuracy, f1, precision, recall, cm, minority_count, majority_count = evaluate_model(majority_ratio)
-    
-    # --- Results Display ---
-    st.header('Dataset and Metrics')
+# Highlight the detected outlier moments
+plt.scatter(
+    anomalies['Date'],
+    anomalies['Value'],
+    color='red',
+    label=f'Anomaly (Z-Score > {threshold})',
+    marker='o',
+    s=100, # size of the marker
+    zorder=5 # ensure the scatter points are on top
+)
 
-    st.markdown(f"""
-    * **Imbalance Ratio:** **{majority_ratio:.1f} : 1**
-    * **Test Samples:** 300
-    * **Majority Class (0) Count:** {majority_count}
-    * **Minority Class (1) Count:** {minority_count}
-    """)
-    
-    st.subheader('Key Metric Comparison')
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric(label="Overall Accuracy", value=f"{accuracy:.4f}")
-        
-    with col2:
-        st.metric(label="F1-Score (Minority Class 1)", value=f"{f1:.4f}")
-        
-    with col3:
-        st.metric(label="Recall (Sensitivity)", value=f"{recall:.4f}")
-        
-    with col4:
-        st.metric(label="Precision", value=f"{precision:.4f}")
-        
-    st.markdown("---")
+plt.title('Time Series Anomaly Detection using Z-Score')
+plt.xlabel('Date')
+plt.ylabel('Value')
+plt.grid(True, linestyle='--', alpha=0.6)
+plt.legend()
 
-    # --- Confusion Matrix Visualization ---
-    st.subheader('Confusion Matrix: Where the Errors Happen')
-    
-    cm_df = pd.DataFrame(
-        cm,
-        index=['Actual Class 0 (Majority)', 'Actual Class 1 (Minority)'],
-        columns=['Predicted Class 0', 'Predicted Class 1']
-    )
-    st.table(cm_df)
-    
-    st.markdown("""
-    #### Why Accuracy Fails:
-    * **High Accuracy:** When the ratio is 9:1, a model that simply predicts **Class 0 (Majority)** all the time gets 90% accuracy!
-    * **The Problem:** The model fails the **Minority Class**. This is seen by a high number in the **False Negatives (FN)** cell (Actual 1, Predicted 0).
-    
-    
-    #### Why F1-Score Succeeds:
-    * **F1-Score** is the harmonic mean of **Precision** and **Recall**.
-    $$ F1 = 2 \cdot \frac{\text{Precision} \cdot \text{Recall}}{\text{Precision} + \text{Recall}} $$
-    * A high **FN** count leads to **low Recall**, and a low number of **True Positives (TP)** leads to low **Precision**. Both pull the F1-Score down, correctly indicating a poor model, even if accuracy is high.
-    """)
+# Display a diagram illustrating the components of a time series
+# 
 
-
-if __name__ == '__main__':
-    main()
+plt.show()

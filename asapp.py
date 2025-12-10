@@ -53,13 +53,16 @@ plt.scatter(
     zorder=5 # ensure the scatter points are on top
 )
 
+# --- Plot Customization ---
 plt.title('Time Series Anomaly Detection using Z-Score')
 plt.xlabel('Date')
 plt.ylabel('Value')
-plt.grid(True, linestyle='--', alpha=0.6)
+plt.grid(True, which='both', linestyle='--', alpha=0.6)
 plt.legend()
 
-# Display a diagram illustrating the components of a time series
-# 
+# The Z-Score is based on the assumption that the data is normally distributed.
+# Points that fall outside 3 standard deviations (the threshold) are considered outliers.
 
+
+# --- Display the Plot ---
 plt.show()
